@@ -4,7 +4,7 @@ require 'net/http'
 require_relative '../lib/ead_transformer'
 
 class ResourcesEadXformController < ApplicationController
-  set_access_control  "view_repository" => [:staff_csv]
+  set_access_control  "view_repository" => [:staff_csv, :staff_csv_but_good]
 
   EAD_PARAMS = {:include_unpublished => true,
                 :print_pdf => false,
@@ -34,6 +34,21 @@ class ResourcesEadXformController < ApplicationController
       }
     end
   end
+
+  def staff_csv_but_good
+    request_uri = "/repositories/#{JSONModel::repository}/resource_descriptions/#{params[:id]}.csv"
+    out = ""
+    xml_response(request_uri, {}) do |chunk, percent|
+      out << chunk
+    end
+    respond_to do |format|
+      format.csv {
+        headers['Last-Modified'] = Time.now.ctime.to_s
+        send_data out, filename: "resource_#{params[:id]}.csv", type: 'text/csv; charset=utf-8'
+      }
+    end
+  end
+
 
   private
   def xml_response(request_uri, params = EAD_PARAMS)

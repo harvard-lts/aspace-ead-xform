@@ -40,11 +40,21 @@ class HarvardCSVModel < ASpaceExport::ExportModel
 
   def process_row(row)
     CSV_HEADERS.map {|hdr|
+      Log.debug(hdr)
+      Log.debug(row)
       raw_val = row[hdr] || '' # nils are just blank
       raw_val.tr!("\t\r\n", " ") # col and record sep to space
       raw_val.gsub!('"', '""') # double internal quotes to escape them
       out = %Q|"#{raw_val}"|
     }.join("\t")
+  rescue Exception => e
+    Log.error("Exception in process_row")
+    if defined? hdr
+      Log.error("hdr: #{hdr}")
+    end
+    Log.error("Error for row: #{row}")
+    Log.error(e.backtrace)
+    raise e
   end
 
   NOTE_TYPES_TO_HANDLE = %w|physloc physdesc accessrestrict|.to_set.freeze
@@ -57,9 +67,9 @@ class HarvardCSVModel < ASpaceExport::ExportModel
       #  should be filled with @resource_id - MySQL doesn't support correlated subqueries
       #  so one can't reference the outer resource ID in the union within the outer query,
       #  and I don't trust it to push down a limit into the CTE either tbh.
-      dataset = db.with_sql(Sequel.lit(<<~SQL, *([@resource_id] * 5)))
-        WITH RECURSIVE ao AS
-          (SELECT id,
+      dataset = db[<<~SQL, *([@resource_id] * 5)]
+        WITH RECURSIVE ao AS (SELECT
+                  id,
                   root_record_id,
                   ref_id,
                   title,
@@ -156,7 +166,7 @@ class HarvardCSVModel < ASpaceExport::ExportModel
          LEFT JOIN date ao_date ON ao_date.archival_object_id = ao.id
          LEFT JOIN date resource_date ON resource_date.resource_id = r.id
              WHERE r.id = ?
-          GROUP BY r.id, ao_id, note.id
+          GROUP BY r.id, ao_id, ao.ref_id, ao.component_id, ao.title, ao.parent_titles, ao.adjusted_pos, level, tc.indicator, sc.indicator_2, sc.indicator_3, note.id
           ORDER BY adjusted_pos ASC, ao.id ASC, note.id ASC
         SQL
       # Iterate over the dataset. Multiple rows with the same AO id are present, due to it
@@ -165,29 +175,36 @@ class HarvardCSVModel < ASpaceExport::ExportModel
       current_id = nil # current AO id, add output row to to_dispatch when it changes
       current_csv_row = {}
       # holds CSV rows until ready to dispatch, emptied after dispatch, contains headers first
-      to_dispatch = [CSV_HEADERS]
+      to_dispatch = [CSV_HEADERS.map{|val|%Q|"#{val.to_s}"|}.join("\t")]
+      Log.debug('Got to dataset.each')
       dataset.each do |input_row|
+        Log.debug("current_id: #{current_id}")
+        Log.debug("ao_id: #{input_row[:ao_id]}")
         if current_id && current_id != input_row[:ao_id]
-          to_dispatch << current_csv_row
+          Log.debug("Adding row to to_dispatch")
+          to_dispatch << process_row(current_csv_row)
           if to_dispatch.length == BATCH_SIZE
-            yield to_dispatch.map {|row| process_row(row)}.join("\r")
-            to_dispatch = []
+            Log.debug('dispatching batch')
+            yield to_dispatch.join("\r") + "\r"
+            to_dispatch.clear
           end
           current_csv_row = {}
-          current_id = input_row[:ao_id]
         end
+        current_id = input_row[:ao_id]
         CSV_HEADERS.each do |hdr|
+          Log.debug("Handling header #{hdr.inspect}")
           current_csv_row[hdr] = input_row[hdr] if input_row.has_key?(hdr)
         end
 
-        if input_row[:note_id]
+        if input_row[:note_id] && input_row[:notes]
+          Log.debug("Loading note #{input_row[:note_id]} with values #{input_row[:notes]}")
           note = JSON.load(input_row[:notes])
           case note['type']
           when 'physloc'
             current_csv_row[:'Phys. Loc'] = note['content'].join(" ")
           when 'physdesc'
             (1..3).each do |i|
-              unless current_csv_row["Phys. Desc. #{i}".to_sym]
+              unless current_csv_row.has_key? "Phys. Desc. #{i}".to_sym
                 current_csv_row["Phys. Desc. #{i}".to_sym] = note['content'].join(" ")
                 break
               end
@@ -196,10 +213,18 @@ class HarvardCSVModel < ASpaceExport::ExportModel
             current_csv_row[:"Access Restrict."] = note['subnotes'].map {|sn| sn['content']}.join(' ')
           end
         end
+        Log.debug("to_dispatch at end of processing: #{to_dispatch}")
       end # end dataset.each
-      unless to_dispatch.empty?
-        yield to_dispatch.map {|row| process_row(row)}.join("\r")
-      end
+      # Because we dispatch when ao_id _changes_ the last row is left over to dispatch
+      to_dispatch << current_csv_row
+      Log.debug('Dispatching final batch')
+      Log.debug(to_dispatch)
+      yield to_dispatch.join("\r")
+
     end # end DB.open
+    Log.debug('Closed db')
+  rescue StandardError => e
+    Log.error(e.backtrace.inspect)
+    raise e
   end # end def each
 end # end HarvardCSVModel
