@@ -46,7 +46,7 @@ class HarvardCSVModel < ASpaceExport::ExportModel
       raw_val.tr!("\t\r\n", " ") # col and record sep to space
       raw_val.gsub!('"', '""') # double internal quotes to escape them
       out = %Q|"#{raw_val}"|
-    }.join("\t")
+    }.join(",")
   rescue Exception => e
     Log.error("Exception in process_row")
     if defined? hdr
@@ -175,7 +175,7 @@ class HarvardCSVModel < ASpaceExport::ExportModel
       current_id = nil # current AO id, add output row to to_dispatch when it changes
       current_csv_row = {}
       # holds CSV rows until ready to dispatch, emptied after dispatch, contains headers first
-      to_dispatch = [CSV_HEADERS.map{|val|%Q|"#{val.to_s}"|}.join("\t")]
+      to_dispatch = [CSV_HEADERS.map{|val|%Q|"#{val.to_s}"|}.join(",")]
       Log.debug('Got to dataset.each')
       dataset.each do |input_row|
         Log.debug("current_id: #{current_id}")
@@ -216,7 +216,7 @@ class HarvardCSVModel < ASpaceExport::ExportModel
         Log.debug("to_dispatch at end of processing: #{to_dispatch}")
       end # end dataset.each
       # Because we dispatch when ao_id _changes_ the last row is left over to dispatch
-      to_dispatch << current_csv_row
+      to_dispatch << process_row(current_csv_row)
       Log.debug('Dispatching final batch')
       Log.debug(to_dispatch)
       yield to_dispatch.join("\r")
