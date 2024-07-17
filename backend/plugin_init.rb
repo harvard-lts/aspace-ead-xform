@@ -28,6 +28,7 @@ class HarvardCSVModel < ASpaceExport::ExportModel
         "Access Restrict.",
         "URN",
         "Collection Title",
+        "Originator_Resource",
         "Collection Date",
         "Collection ID",
         "Parent 1",
@@ -63,11 +64,11 @@ class HarvardCSVModel < ASpaceExport::ExportModel
   #   e.g.(1, 1a, 1b, 2, 2a, 3, 4, 4a)
   def each
     DB.open do |db|
-      # There are five placeholder positions in this cursed SQL, all of which
+      # There are eight placeholder positions in this cursed SQL, all of which
       #  should be filled with @resource_id - MySQL doesn't support correlated subqueries
       #  so one can't reference the outer resource ID in the union within the outer query,
       #  and I don't trust it to push down a limit into the CTE either tbh.
-      dataset = db[<<~SQL, *([@resource_id] * 5)]
+      dataset = db[<<~SQL, *([@resource_id] * 8)]
         WITH RECURSIVE ao AS (SELECT
                   id,
                   root_record_id,
@@ -113,6 +114,7 @@ class HarvardCSVModel < ASpaceExport::ExportModel
                 sc.indicator_2 AS "Container 2",
                 sc.indicator_3 AS "Container 3",
                 group_concat(fv.file_uri SEPARATOR ';') AS "URN",
+                group_concat(resource_creators.sort_name SEPARATOR ';') AS "Originator_Resource",
                 r.title AS "Collection Title",
                 group_concat(resource_date.expression SEPARATOR '; ') AS "Collection Date",
                 REGEXP_REPLACE(
@@ -135,6 +137,33 @@ class HarvardCSVModel < ASpaceExport::ExportModel
          LEFT JOIN instance_do_link_rlshp idlr ON i.id = idlr.instance_id
          LEFT JOIN digital_object do ON do.id = idlr.digital_object_id
          LEFT JOIN file_version fv ON fv.digital_object_id = do.id
+         LEFT JOIN (SELECT r_p.id, sort_name FROM resource r_p
+                    JOIN linked_agents_rlshp r_lar_p ON r_lar_p.resource_id = r_p.id
+                    JOIN agent_person r_ap ON r_lar_p.agent_person_id = r_ap.id
+                    JOIN name_person r_np ON r_np.agent_person_id = r_ap.id
+                    JOIN enumeration_value r_agent_role_p ON r_agent_role_p.id = r_lar_p.role_id
+                    WHERE r_p.id = ?
+                    AND r_agent_role_p.value IN ('creator', 'source')
+                    AND r_np.is_display_name = true
+                    UNION ALL
+                    SELECT r_f.id, sort_name FROM resource r_f
+                    JOIN linked_agents_rlshp r_lar_f ON r_lar_f.resource_id = r_f.id
+                    JOIN agent_family r_af ON r_af.id = r_lar_f.agent_family_id
+                    JOIN name_family r_nf ON r_nf.agent_family_id = r_af.id
+                    JOIN enumeration_value r_agent_role_f ON r_agent_role_f.id = r_lar_f.role_id
+                    WHERE r_f.id = ?
+                    AND r_agent_role_f.value IN ('creator', 'source')
+                    AND r_nf.is_display_name = true
+                    UNION ALL
+                    SELECT r_ce.id, sort_name FROM resource r_ce
+                    JOIN linked_agents_rlshp r_lar_ce ON r_lar_ce.resource_id = r_ce.id
+                    JOIN agent_corporate_entity r_ace ON r_ace.id = r_lar_ce.agent_corporate_entity_id
+                    JOIN name_corporate_entity r_nce ON r_nce.agent_corporate_entity_id = r_ace.id
+                    JOIN enumeration_value r_agent_role_ce ON r_agent_role_ce.id = r_lar_ce.role_id
+                    WHERE r_ce.id = ?
+                    AND r_agent_role_ce.value IN ('creator', 'source')
+                    AND r_nce.is_display_name = true
+                    ) resource_creators ON resource_creators.id = r.id
          LEFT JOIN (SELECT ao_p.id, sort_name FROM archival_object ao_p
                     JOIN linked_agents_rlshp lar ON lar.archival_object_id = ao_p.id
                     JOIN agent_person ap ON ap.id = lar.agent_person_id
@@ -165,9 +194,9 @@ class HarvardCSVModel < ASpaceExport::ExportModel
          LEFT JOIN note ON note.archival_object_id = ao.id
          LEFT JOIN date ao_date ON ao_date.archival_object_id = ao.id
          LEFT JOIN date resource_date ON resource_date.resource_id = r.id
-             WHERE r.id = ?
-          GROUP BY r.id, ao_id, ao.ref_id, ao.component_id, ao.title, ao.parent_titles, ao.adjusted_pos, level, tc.indicator, sc.indicator_2, sc.indicator_3, note.id
-          ORDER BY adjusted_pos ASC, ao.id ASC, note.id ASC
+         WHERE r.id = ?
+         GROUP BY r.id, ao_id, ao.ref_id, ao.component_id, ao.title, ao.parent_titles, ao.adjusted_pos, level, tc.indicator, sc.indicator_2, sc.indicator_3, note.id
+         ORDER BY adjusted_pos ASC, ao.id ASC, note.id ASC
         SQL
       # Iterate over the dataset. Multiple rows with the same AO id are present, due to it
       #   being infeasible to group notes together, so it's necessary to collect and
@@ -175,7 +204,14 @@ class HarvardCSVModel < ASpaceExport::ExportModel
       current_id = nil # current AO id, add output row to to_dispatch when it changes
       current_csv_row = {}
       # holds CSV rows until ready to dispatch, emptied after dispatch, contains headers first
-      to_dispatch = [CSV_HEADERS.map{|val|%Q|"#{val.to_s}"|}.join(",")]
+      to_dispatch = [CSV_HEADERS.map{|val|
+                       case val
+                       when /Originator_Resource/
+                         '"Originator"'
+                       else
+                         %Q|"#{val.to_s}"|
+                       end
+                     }.join(",")]
       Log.debug('Got to dataset.each')
       dataset.each do |input_row|
         Log.debug("current_id: #{current_id}")
@@ -213,6 +249,8 @@ class HarvardCSVModel < ASpaceExport::ExportModel
             current_csv_row[:"Access Restrict."] = note['subnotes'].map {|sn| sn['content']}.join(' ')
           end
         end
+
+
         Log.debug("to_dispatch at end of processing: #{to_dispatch}")
       end # end dataset.each
       # Because we dispatch when ao_id _changes_ the last row is left over to dispatch
