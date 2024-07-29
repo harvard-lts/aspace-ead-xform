@@ -1,3 +1,4 @@
+require 'set'
 class HarvardCSVModel < ASpaceExport::ExportModel
   model_for :harvard_csv
 
@@ -44,8 +45,14 @@ class HarvardCSVModel < ASpaceExport::ExportModel
       Log.debug(hdr)
       Log.debug(row)
       raw_val = row[hdr] || '' # nils are just blank
+      if hdr == :'Unit Title'
+        # strip HTML tags - one downside of doing this in the backend
+        # is we don't have Rails sanitizers, so we turn to regexp
+        raw_val.gsub!(%r{</?\w+[^>/]*/?>}, '')
+      end
       raw_val.tr!("\t\r\n", " ") # col and record sep to space
       raw_val.gsub!('"', '""') # double internal quotes to escape them
+
       out = %Q|"#{raw_val}"|
     }.join(",")
   rescue Exception => e
@@ -58,7 +65,7 @@ class HarvardCSVModel < ASpaceExport::ExportModel
     raise e
   end
 
-  NOTE_TYPES_TO_HANDLE = %w|physloc physdesc accessrestrict|.to_set.freeze
+  PHYSDESC_NOTE_TYPES = %w|dimensions physdesc physfacet|.to_set.freeze
   BATCH_SIZE = 100
   # Fetch AOs from a resource and present them in tree order
   #   e.g.(1, 1a, 1b, 2, 2a, 3, 4, 4a)
@@ -238,7 +245,7 @@ class HarvardCSVModel < ASpaceExport::ExportModel
           case note['type']
           when 'physloc'
             current_csv_row[:'Phys. Loc'] = note['content'].join(" ")
-          when 'physdesc'
+          when PHYSDESC_NOTE_TYPES
             (1..3).each do |i|
               unless current_csv_row.has_key? "Phys. Desc. #{i}".to_sym
                 current_csv_row["Phys. Desc. #{i}".to_sym] = note['content'].join(" ")
