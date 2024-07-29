@@ -45,7 +45,7 @@ class HarvardCSVModel < ASpaceExport::ExportModel
       Log.debug(hdr)
       Log.debug(row)
       raw_val = row[hdr] || '' # nils are just blank
-      if hdr == 'Unit Title'
+      if hdr == :'Unit Title'
         # strip HTML tags - one downside of doing this in the backend
         # is we don't have Rails sanitizers, so we turn to regexp
         raw_val.gsub!(%r{</?\w+[^>/]*/?>}, '')
@@ -65,7 +65,7 @@ class HarvardCSVModel < ASpaceExport::ExportModel
     raise e
   end
 
-  PHYSDESC_NOTE_TYPES = %w|dimensions physdesc physfacet|.to_set.freeze.method(:include?)
+  PHYSDESC_NOTE_TYPES = %w|dimensions physdesc physfacet|.to_set.freeze
   BATCH_SIZE = 100
   # Fetch AOs from a resource and present them in tree order
   #   e.g.(1, 1a, 1b, 2, 2a, 3, 4, 4a)
