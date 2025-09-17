@@ -245,13 +245,28 @@ class HarvardCSVModel < ASpaceExport::ExportModel
           case note['type']
           when 'physloc'
             current_csv_row[:'Phys. Loc'] = note['content'].join(" ")
+
           when PHYSDESC_NOTE_TYPES
             (1..3).each do |i|
               unless current_csv_row.has_key? "Phys. Desc. #{i}".to_sym
-                current_csv_row["Phys. Desc. #{i}".to_sym] = note['content'].join(" ")
+                begin
+                  content = if note.key? 'content'
+                              note['content'].join(" ")
+                            elsif note.key? 'subnotes'
+                              note['subnotes'].map {|n|
+                                n['content']
+                              }.join(" ")
+                            else
+                              'ERROR: problem parsing note content'
+                            end
+                rescue StandardError => e
+                  content = 'ERROR: problem parsing note content'
+                end
+                current_csv_row["Phys. Desc. #{i}".to_sym] = content
                 break
               end
             end
+
           when 'accessrestrict'
             current_csv_row[:"Access Restrict."] = note['subnotes'].map {|sn| sn['content']}.join(' ')
           end
