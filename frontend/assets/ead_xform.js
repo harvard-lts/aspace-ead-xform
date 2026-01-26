@@ -13,11 +13,11 @@ $(function () {
     }
 
 	var addCsvBtn = function () {
-		if (!csvBtnAdded) {
+		if (!csvBtnAdded && !$("li.hvd-download-csv").length) {
 			var $eadBtn = $("#download-ead-dropdown");
 			if ($eadBtn.length > 0) {
 				a = '/resources/' +  ead_xform_id + '/staff_csv';
-				$eadBtn.after('<li class="hvd-download-csv"><a class="dropdown-item" ref="' + a + '">Download CSV</a></li>');
+				$eadBtn.after('<li class="hvd-download-csv"><a class="dropdown-item" href="' + a + '">Download CSV</a></li>');
 				csvBtnAdded = true;
 			}
 		}
