@@ -1,9 +1,5 @@
 # generic EAD transformer.  Borrowed shamelessly from the work https://github.com/pobocks id in https://github.com/harvard-library/schematronium
 
-
-require 'saxon-rb'
-require 'saxon/nokogiri'
-
 class EadTransformer
   # constructor for the transformer
   # @param[String]ead  the EAD
