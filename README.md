@@ -10,3 +10,10 @@ Currently, the CSV does **not** include unpublished components, to match that fu
 
 This plugin will begin life on the ArchivesSpace `/frontend`; subsequent use of the core transform class may need to be duplicated on the `/public` side as well.
 
+## Installing in aspace docker
+
+In the archivesspace container:
+
+./scripts/initialize-plugin.sh aspace-ead-xform
+
+to initialize
